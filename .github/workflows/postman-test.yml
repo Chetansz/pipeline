@@ -1,8 +1,8 @@
 name: Automated API tests using Postman CLI
 
 on:
-  push
-  workflow_dispatch  # 👈 This line enables the "Run workflow" button
+  push:             # Trigger on push
+  workflow_dispatch: # Enables the "Run workflow" button in GitHub Actions UI
 
 jobs:
   automated-api-tests:
