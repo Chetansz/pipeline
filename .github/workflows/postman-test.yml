@@ -1,275 +1,57 @@
-name: Automated API tests using Newman via Postman API
+name: Automated API tests using Postman CLI
 on:
-  push:
-  workflow_dispatch:
+  push:             # Trigger on push
+  workflow_dispatch: # Enables the "Run workflow" button in GitHub Actions UI
 jobs:
   automated-api-tests:
-    runs-on: ubuntu-latest
+    runs-on: windows-latest
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
       
-      - name: Setup Node.js
-        uses: actions/setup-node@v3
-        with:
-          node-version: '16'
-      
-      - name: Install Newman and required packages
+      - name: Install Postman CLI
         run: |
-          npm install -g newman newman-reporter-html
-          npm install node-fetch@2 # Version 2 has better CommonJS support
+          powershell.exe -NoProfile -InputFormat None -ExecutionPolicy AllSigned -Command "[System.Net.ServicePointManager]::SecurityProtocol = 3072; iex ((New-Object System.Net.WebClient).DownloadString('https://dl-cli.pstmn.io/install/win64.ps1'))"
+      
+      - name: Login to Postman CLI
+        run: postman login --with-api-key ${{ secrets.POSTMAN_API_KEY }}
 
-      - name: Create packages directory
-        run: mkdir -p newman-packages
-      
-      - name: Create auth validation package
+      # Create local environment file from GitHub secrets
+      - name: Create environment file
+        shell: powershell
         run: |
-          cat > newman-packages/auth-validation.js << 'EOL'
-          // Auth validation package - copy the code from your Postman package here
-          // This is based on the package structure we created earlier
-          class AuthValidation {
-            constructor(config) {
-              this.config = config;
-            }
-          
-            async validateToken() {
-              const now = Math.floor(Date.now() / 1000);
-              const existingToken = this.config.getEnvironmentVariable("bearerToken");
-              const tokenExpiry = parseInt(this.config.getEnvironmentVariable("tokenExpiry") || "0");
-          
-              if (existingToken && tokenExpiry > now) {
-                console.log("Using existing token:", existingToken);
-                return existingToken;
-              } else {
-                return await this.fetchNewToken();
+          $envJson = @{
+            "values" = @(
+              @{
+                "key" = "baseURLIdentity";
+                "value" = "${{ secrets.BASE_URL_IDENTITY }}";
+                "enabled" = $true;
+              },
+              @{
+                "key" = "baseURL";
+                "value" = "${{ secrets.BASE_URL }}";
+                "enabled" = $true;
+              },
+              @{
+                "key" = "username";
+                "value" = "${{ secrets.API_USERNAME }}";
+                "enabled" = $true;
+              },
+              @{
+                "key" = "password";
+                "value" = "${{ secrets.API_PASSWORD }}";
+                "enabled" = $true;
+              },
+              @{
+                "key" = "tenant";
+                "value" = "${{ secrets.TENANT }}";
+                "enabled" = $true;
               }
-            }
+            )
+          } | ConvertTo-Json -Depth 10
           
-            async fetchNewToken() {
-              try {
-                const fetch = require('node-fetch');
-                const baseURLIdentity = this.config.getEnvironmentVariable("baseURLIdentity");
-                const tenant = this.config.getEnvironmentVariable("tenant");
-                const username = this.config.getEnvironmentVariable("username");
-                const password = this.config.getEnvironmentVariable("password");
-                
-                const response = await fetch(baseURLIdentity + "/api/tokens", {
-                  method: "POST",
-                  headers: {
-                    "accept": "application/json",
-                    "tenant": tenant,
-                    "Content-Type": "application/json"
-                  },
-                  body: JSON.stringify({
-                    username: username,
-                    password: password
-                  })
-                });
-          
-                const jsonData = await response.json();
-                const idToken = jsonData.data.idToken;
-                this.config.setEnvironmentVariable("bearerToken", idToken);
-                
-                // Decode expiry and save it
-                const exp = this.getTokenExpiry(idToken);
-                this.config.setEnvironmentVariable("tokenExpiry", exp);
-                
-                console.log("New token fetched and saved:", idToken);
-                return idToken;
-              } catch (error) {
-                console.log("Error fetching token:", error);
-                throw error;
-              }
-            }
-          
-            getTokenExpiry(token) {
-              try {
-                const payload = JSON.parse(Buffer.from(token.split('.')[1], 'base64').toString());
-                return payload.exp;
-              } catch (e) {
-                console.log("Failed to parse token expiry:", e);
-                return 0;
-              }
-            }
-          
-            async validateLeadId(requestURL, requestBody) {
-              const token = this.config.getEnvironmentVariable("bearerToken");
-              const baseURL = this.config.getEnvironmentVariable("baseURL");
-              const tenant = this.config.getEnvironmentVariable("tenant") || "sleep";
-              
-              const usesLeadId = requestURL.includes("{{leadId}}") || requestBody.includes("{{leadId}}");
-              
-              if (!usesLeadId) {
-                console.log("This request does not use leadId.");
-                return null;
-              }
-              
-              const currentLeadId = this.config.getEnvironmentVariable("leadId");
-              
-              if (currentLeadId) {
-                const isValid = await this.checkLeadIdValidity(currentLeadId, baseURL, token, tenant);
-                if (isValid) {
-                  console.log("Existing leadId is valid.");
-                  return currentLeadId;
-                } else {
-                  console.log("leadId invalid. Fetching new one...");
-                  return await this.fetchNewLeadId(baseURL, token, tenant);
-                }
-              } else {
-                return await this.fetchNewLeadId(baseURL, token, tenant);
-              }
-            }
-            
-            async checkLeadIdValidity(leadId, baseURL, token, tenant) {
-              try {
-                const fetch = require('node-fetch');
-                const response = await fetch(`${baseURL}/api/v1/lead/${leadId}`, {
-                  method: 'GET',
-                  headers: {
-                    'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${token}`,
-                    'tenant': tenant
-                  }
-                });
-                
-                return response.status === 200;
-              } catch (error) {
-                return false;
-              }
-            }
-            
-            async fetchNewLeadId(baseURL, token, tenant) {
-              const leadURL = `${baseURL}/api/v1/lead/new/all?PageNumber=1&PageSize=10`;
-              
-              try {
-                const fetch = require('node-fetch');
-                const response = await fetch(leadURL, {
-                  method: 'GET',
-                  headers: {
-                    'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${token}`,
-                    'tenant': tenant
-                  }
-                });
-                
-                if (response.status === 200) {
-                  const responseData = await response.json();
-                  if (responseData.items && responseData.items.length > 0) {
-                    const newLeadId = responseData.items[0].id;
-                    this.config.setEnvironmentVariable("leadId", newLeadId);
-                    console.log("New leadId set:", newLeadId);
-                    return newLeadId;
-                  }
-                }
-                console.warn("Failed to fetch leadId.");
-                return null;
-              } catch (error) {
-                console.warn("Failed to fetch leadId:", error);
-                return null;
-              }
-            }
-          }
-          
-          module.exports = AuthValidation;
-          EOL
+          Set-Content -Path "local-environment.json" -Value $envJson
 
-      - name: Create package loader for Newman
+      # Run the collection with the local environment file
+      - name: Run API tests with local environment
         run: |
-          cat > newman-package-loader.js << 'EOL'
-          const fs = require('fs');
-          const path = require('path');
-          
-          // Create mock Postman pm object
-          global.pm = {
-            environment: {
-              get: (key) => process.env[key],
-              set: (key, value) => { process.env[key] = value; }
-            },
-            sendRequest: function(options, callback) {
-              const fetch = require('node-fetch');
-              fetch(options.url, {
-                method: options.method || 'GET',
-                headers: options.header,
-                body: options.body ? options.body.raw : undefined
-              })
-              .then(async response => {
-                const data = await response.json();
-                callback(null, {
-                  code: response.status,
-                  json: () => data
-                });
-              })
-              .catch(error => callback(error));
-            },
-            request: {
-              url: { toString: () => process.env.CURRENT_REQUEST_URL || "" },
-              body: { raw: process.env.CURRENT_REQUEST_BODY || "" }
-            }
-          };
-          
-          // Add the package system
-          global.pm.require = function(packageName) {
-            try {
-              // Check if it's one of our custom packages
-              const packagePath = path.join(__dirname, 'newman-packages', packageName + '.js');
-              if (fs.existsSync(packagePath)) {
-                const PackageClass = require(packagePath);
-                const config = {
-                  getEnvironmentVariable: (key) => process.env[key],
-                  setEnvironmentVariable: (key, value) => { process.env[key] = value },
-                  makeRequest: async (options) => {
-                    const fetch = require('node-fetch');
-                    const response = await fetch(options.url, {
-                      method: options.method,
-                      headers: options.headers,
-                      body: options.body
-                    });
-                    return {
-                      status: response.status,
-                      json: async () => await response.json()
-                    };
-                  }
-                };
-                return new PackageClass(config);
-              } else {
-                console.error(`Package ${packageName} not found`);
-                throw new Error(`Package ${packageName} not found`);
-              }
-            } catch (error) {
-              console.error(`Error loading package ${packageName}:`, error);
-              throw error;
-            }
-          };
-          
-          // Other necessary globals
-          global.atob = (str) => Buffer.from(str, 'base64').toString('binary');
-          global.btoa = (str) => Buffer.from(str).toString('base64');
-          
-          console.log("Postman package system initialized");
-          EOL
-      
-      - name: Setup environment variables
-        run: |
-          # Set these from GitHub secrets
-          export baseURLIdentity="${{ secrets.BASE_URL_IDENTITY }}"
-          export baseURL="${{ secrets.BASE_URL }}"
-          export username="${{ secrets.API_USERNAME }}"
-          export password="${{ secrets.API_PASSWORD }}"
-          export tenant="${{ secrets.TENANT }}"
-      
-      - name: Run Postman Collection with package support
-        run: |
-          # Run Newman with our custom package loader
-          node -r ./newman-package-loader.js \
-          newman run "https://api.postman.com/collections/44208231-1c6a7981-4be4-4441-9435-6397f396a1b5?apikey=${{ secrets.POSTMAN_API_KEY }}" \
-            -e "https://api.postman.com/environments/286eeae8-e641-4a0c-a02a-339b10b1b21e?apikey=${{ secrets.POSTMAN_API_KEY }}" \
-            --reporters cli,html \
-            --reporter-html-export newman-report.html \
-            --suppress-exit-code || true
-      
-      - name: Upload HTML report
-        if: always()
-        uses: actions/upload-artifact@v4  # Updated from v3 to v4
-        with:
-          name: newman-reports
-          path: newman-report.html
+          postman collection run "44208231-1c6a7981-4be4-4441-9435-6397f396a1b5" --environment-file "local-environment.json" --environment "44208231-286eeae8-e641-4a0c-a02a-339b10b1b21e"
