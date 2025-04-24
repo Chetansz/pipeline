@@ -14,44 +14,7 @@ jobs:
       
       - name: Login to Postman CLI
         run: postman login --with-api-key ${{ secrets.POSTMAN_API_KEY }}
-
-      # Create local environment file from GitHub secrets
-      - name: Create environment file
-        shell: powershell
+      
+      - name: Run API tests
         run: |
-          $envJson = @{
-            "values" = @(
-              @{
-                "key" = "baseURLIdentity";
-                "value" = "${{ secrets.BASE_URL_IDENTITY }}";
-                "enabled" = $true;
-              },
-              @{
-                "key" = "baseURL";
-                "value" = "${{ secrets.BASE_URL }}";
-                "enabled" = $true;
-              },
-              @{
-                "key" = "username";
-                "value" = "${{ secrets.API_USERNAME }}";
-                "enabled" = $true;
-              },
-              @{
-                "key" = "password";
-                "value" = "${{ secrets.API_PASSWORD }}";
-                "enabled" = $true;
-              },
-              @{
-                "key" = "tenant";
-                "value" = "${{ secrets.TENANT }}";
-                "enabled" = $true;
-              }
-            )
-          } | ConvertTo-Json -Depth 10
-          
-          Set-Content -Path "local-environment.json" -Value $envJson
-
-      # Run the collection with the local environment file
-      - name: Run API tests with local environment
-        run: |
-          postman collection run "44208231-1c6a7981-4be4-4441-9435-6397f396a1b5" --environment-file "local-environment.json" --environment "44208231-286eeae8-e641-4a0c-a02a-339b10b1b21e"
+          postman collection run "44208231-1c6a7981-4be4-4441-9435-6397f396a1b5" -e "286eeae8-e641-4a0c-a02a-339b10b1b21e"
