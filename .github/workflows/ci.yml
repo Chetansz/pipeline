@@ -1,0 +1,45 @@
+name: CI with SonarQube, ZAP, and Cypress
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v3
+        with:
+          dotnet-version: '7.x'
+
+      - name: Build the app
+        run: dotnet build
+
+      - name: Run Unit Tests (optional)
+        run: dotnet test
+
+      - name: Build Docker containers
+        run: docker-compose up -d --build
+
+      - name: Wait for services
+        run: sleep 30
+
+      - name: ZAP DAST Scan
+        run: |
+          docker run --network=host owasp/zap2docker-stable zap-baseline.py -t http://localhost:5000
+
+      - name: Functional Tests (Cypress)
+        uses: cypress-io/github-action@v6
+        with:
+          start: npm start
+          wait-on: 'http://localhost:5000'
+
+      - name: SonarQube Analysis (Mock)
+        run: echo "SonarQube analysis should be added here"
